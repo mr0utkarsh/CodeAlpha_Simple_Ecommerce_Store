@@ -184,6 +184,41 @@ export function CartProvider({ children }) {
     previousUserId.current = currentUserId;
   }, [user?.id]);
 
+  // Keep the signed-out flow identical: clamp like the API does, persist, re-hydrate.
+  const updateQuantity = useCallback(
+    async (item, quantity) => {
+      if (!item?.productId) return;
+
+      const stockCeiling = item.product?.stock || MAX_QUANTITY_PER_ITEM;
+      const nextQuantity = Math.max(
+        1,
+        Math.min(quantity || 1, stockCeiling, MAX_QUANTITY_PER_ITEM)
+      );
+
+      setIsMutating(true);
+      try {
+        if (isAuthenticated) {
+          const payload = await cartApi.update(item.id, nextQuantity);
+          applyServerCart(payload?.data);
+        } else {
+          const stored = readGuestCart();
+          writeGuestCart(
+            stored.map((entry) =>
+              entry.productId === item.productId ? { ...entry, quantity: nextQuantity } : entry
+            )
+          );
+          await hydrateGuestCart();
+        }
+      } catch (requestError) {
+        toast.error(requestError.message || 'We could not update that item.');
+        throw requestError;
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [applyServerCart, hydrateGuestCart, isAuthenticated, toast]
+  );
+
   const addItem = useCallback(
     async (product, quantity = 1) => {
       if (!product?.id) return;
